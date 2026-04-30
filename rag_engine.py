@@ -1,7 +1,7 @@
 import chromadb
 import fitz
 from sentence_transformers import SentenceTransformer
-import google.generativeai as genai
+from groq import Groq
 import os
 
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
@@ -9,58 +9,58 @@ embedder = SentenceTransformer("all-MiniLM-L6-v2")
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection("documents")
 
-def extract_text_from_pdf(pdf_path):
+def extract_text_from_pdf(pdf_path: str) -> str:
     doc = fitz.open(pdf_path)
     text = ""
     for page in doc:
         text += page.get_text()
     return text
 
-def chunk_text(text, chunk_size=500, overlap=50):
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list:
     words = text.split()
     chunks = []
     for i in range(0, len(words), chunk_size - overlap):
-        chunk = " ".join(words[i:i + chunk_size])
-        chunks.append(chunk)
+        chunk = " ".join(words[i : i + chunk_size])
+        if chunk:
+            chunks.append(chunk)
     return chunks
 
-def ingest_document(pdf_path, doc_name):
-    text = extract_text_from_pdf(pdf_path)
-    chunks = chunk_text(text)
+def ingest_document(pdf_path: str, doc_name: str):
+    raw_text = extract_text_from_pdf(pdf_path)
+    chunks = chunk_text(raw_text)
     embeddings = embedder.encode(chunks).tolist()
-
-    ids = [f"{doc_name}_{i}" for i in range(len(chunks))]
-
+    ids = [f"{doc_name}_chunk_{i}" for i in range(len(chunks))]
     collection.upsert(
         documents=chunks,
         embeddings=embeddings,
-        ids=ids
+        ids=ids,
+        metadatas=[{"source": doc_name}] * len(chunks)
     )
-
     return len(chunks)
 
-def query_documents(question):
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-
+def query_documents(question: str, top_k: int = 3):
     question_embedding = embedder.encode([question]).tolist()
-
     results = collection.query(
         query_embeddings=question_embedding,
-        n_results=3
+        n_results=top_k
     )
+    context_chunks = results["documents"][0]
+    context = "\n\n---\n\n".join(context_chunks)
 
-    context = "\n".join(results["documents"][0])
+    client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
-    model = genai.GenerativeModel("gemini-2.0-flash")
-
-    prompt = f"""
-Answer using only the context below:
-
-{context}
-
-Question: {question}
-"""
-
-    response = model.generate_content(prompt)
-
-    return response.text, results["documents"][0]
+    response = client.chat.completions.create(
+        model="llama3-8b-8192",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a helpful assistant. Answer questions using ONLY the context provided. If the answer is not in the context, say 'I couldn't find that in the document.'"
+            },
+            {
+                "role": "user",
+                "content": f"Context:\n{context}\n\nQuestion: {question}"
+            }
+        ]
+    )
+    answer = response.choices[0].message.content
+    return answer, context_chunks
