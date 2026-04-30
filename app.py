@@ -1,3 +1,5 @@
+import streamlit as st
+st.title("RAG Chatbot 🤖")
 api_key = st.text_input(
     "Groq API Key",
     type="password",
