@@ -1,151 +1,73 @@
-"""
-RAG Chatbot — Streamlit frontend
-Run with:  streamlit run app.py
-"""
-
+import streamlit as st
 import os
 import tempfile
+from rag_engine import ingest_document, query_documents
 
-import streamlit as st
-
-from rag_engine import ingest_document, list_ingested_sources, query_documents
-
-# ---------------------------------------------------------------------------
-# Page config
-# ---------------------------------------------------------------------------
-st.set_page_config(page_title="RAG Chatbot", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="RAG Chatbot 🤖", layout="centered")
 st.title("RAG Chatbot 🤖")
-st.caption("Upload PDF documents and ask questions about them.")
 
-# ---------------------------------------------------------------------------
-# Session state initialisation
-# BUG FIX: the original app.py only stored the API key in os.environ for the
-# current rerun; session_state persists it across Streamlit reruns.
-# ---------------------------------------------------------------------------
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history: list[dict] = []
-
-if "api_key_set" not in st.session_state:
-    st.session_state.api_key_set = False
-
-# ---------------------------------------------------------------------------
-# Sidebar — API key + document ingestion
-# ---------------------------------------------------------------------------
-with st.sidebar:
-    st.header("⚙️ Configuration")
-
-    # --- API Key ---
-    api_key = st.text_input(
-        "Groq API Key",
-        type="password",
-        help="Get your free key at console.groq.com",
-        placeholder="gsk_...",
-    )
-    if api_key:
-        os.environ["GROQ_API_KEY"] = api_key
-        st.session_state.api_key_set = True
-        st.success("✅ API Key set!")
-    elif not st.session_state.api_key_set:
-        st.warning("Please enter your Groq API key to enable answering.")
-
-    st.divider()
-
-    # --- Document upload & ingestion ---
-    # BUG FIX: the original app.py had NO upload or ingestion UI at all,
-    # making it impossible to actually use the RAG pipeline.
-    st.header("📄 Upload Documents")
-    uploaded_file = st.file_uploader(
-        "Upload a PDF", type=["pdf"], label_visibility="collapsed"
-    )
-
-    if uploaded_file is not None:
-        doc_name = uploaded_file.name.replace(" ", "_").replace(".pdf", "")
-        if st.button("📥 Ingest Document", use_container_width=True):
-            with st.spinner(f"Ingesting '{uploaded_file.name}'…"):
-                try:
-                    # Save to a temp file so fitz can open it
-                    with tempfile.NamedTemporaryFile(
-                        delete=False, suffix=".pdf"
-                    ) as tmp:
-                        tmp.write(uploaded_file.read())
-                        tmp_path = tmp.name
-
-                    num_chunks = ingest_document(tmp_path, doc_name)
-                    os.unlink(tmp_path)  # clean up temp file
-                    st.success(
-                        f"✅ '{uploaded_file.name}' ingested successfully "
-                        f"({num_chunks} chunks)."
-                    )
-                except ValueError as exc:
-                    st.error(f"❌ {exc}")
-                except Exception as exc:
-                    st.error(f"❌ Unexpected error: {exc}")
-
-    st.divider()
-
-    # --- Show ingested docs ---
-    st.header("📚 Ingested Documents")
-    sources = list_ingested_sources()
-    if sources:
-        for src in sources:
-            st.markdown(f"- `{src}`")
-    else:
-        st.info("No documents ingested yet.")
-
-    # Clear chat history button
-    st.divider()
-    if st.button("🗑️ Clear Chat History", use_container_width=True):
-        st.session_state.chat_history = []
-        st.rerun()
-
-# ---------------------------------------------------------------------------
-# Main area — chat
-# ---------------------------------------------------------------------------
-
-# Render existing chat history
-for msg in st.session_state.chat_history:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-        if msg["role"] == "assistant" and msg.get("sources"):
-            with st.expander("📎 Source chunks used"):
-                for i, chunk in enumerate(msg["sources"], 1):
-                    st.markdown(f"**Chunk {i}:** {chunk[:400]}…")
-
-# BUG FIX: the original app.py used st.text_input and wrote "Coming soon…"
-# instead of calling query_documents.  Here we use st.chat_input (the modern
-# Streamlit chat API) and fully wire it to the RAG backend.
-user_question = st.chat_input(
-    "Ask a question about your uploaded documents…",
-    disabled=not st.session_state.api_key_set,
+# ── API Key ──────────────────────────────────────────────────────────────────
+api_key = st.text_input(
+    "Groq API Key",
+    type="password",
+    help="Get your free key at console.groq.com",
 )
 
-if user_question:
-    # Show user message
-    st.session_state.chat_history.append(
-        {"role": "user", "content": user_question}
-    )
-    with st.chat_message("user"):
-        st.markdown(user_question)
+if api_key:
+    os.environ["GROQ_API_KEY"] = api_key
+    st.success("API Key set successfully!")
+else:
+    st.warning("Please enter your Groq API key to continue.")
+    st.stop()          # Don't render the rest until the key is provided
 
-    # Query the RAG engine
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking…"):
+# ── PDF Upload & Ingestion ────────────────────────────────────────────────────
+st.subheader("📄 Upload a PDF Document")
+uploaded_file = st.file_uploader("Choose a PDF file", type=["pdf"])
+
+if uploaded_file is not None:
+    doc_name = uploaded_file.name.replace(".pdf", "").replace(" ", "_")
+
+    if st.button("Ingest Document"):
+        with st.spinner("Ingesting document..."):
+            # Save upload to a temp file so fitz can open it
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(uploaded_file.read())
+                tmp_path = tmp.name
+
             try:
-                answer, source_chunks = query_documents(user_question)
-            except Exception as exc:
-                answer = f"❌ Error: {exc}"
-                source_chunks = []
+                num_chunks = ingest_document(tmp_path, doc_name)
+                st.success(f"✅ Ingested **{num_chunks}** chunks from '{uploaded_file.name}'.")
+                st.session_state["doc_ingested"] = True
+            except Exception as e:
+                st.error(f"❌ Ingestion failed: {e}")
+            finally:
+                os.unlink(tmp_path)   # Clean up temp file
 
-        st.markdown(answer)
-        if source_chunks:
-            with st.expander("📎 Source chunks used"):
-                for i, chunk in enumerate(source_chunks, 1):
-                    st.markdown(f"**Chunk {i}:** {chunk[:400]}…")
+# ── Q&A Section ───────────────────────────────────────────────────────────────
+st.subheader("💬 Ask a Question")
 
-    st.session_state.chat_history.append(
-        {
-            "role": "assistant",
-            "content": answer,
-            "sources": source_chunks,
-        }
-    )
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = []
+
+user_question = st.text_input("Ask a question about your document:")
+
+if user_question:
+    with st.spinner("Searching document and generating answer..."):
+        try:
+            answer, context_chunks = query_documents(user_question)
+            st.session_state["chat_history"].append(
+                {"question": user_question, "answer": answer, "chunks": context_chunks}
+            )
+        except ValueError as e:
+            st.error(f"❌ {e}")
+        except Exception as e:
+            st.error(f"❌ Error: {e}")
+
+# Display chat history (most recent first)
+for entry in reversed(st.session_state["chat_history"]):
+    st.markdown(f"**🙋 You:** {entry['question']}")
+    st.markdown(f"**🤖 Answer:** {entry['answer']}")
+    with st.expander("📚 Source chunks used"):
+        for i, chunk in enumerate(entry["chunks"], 1):
+            st.markdown(f"**Chunk {i}:** {chunk}")
+    st.divider()
