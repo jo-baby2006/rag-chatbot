@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 st.title("RAG Chatbot 🤖")
 api_key = st.text_input(
     "Groq API Key",
