@@ -51,7 +51,7 @@ def query_documents(question):
 
     context = "\n".join(results["documents"][0])
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.0-flash")
 
     prompt = f"""
 Answer using only the context below:
