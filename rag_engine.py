@@ -107,7 +107,7 @@ def query_documents(question, top_k=3):
 
     client = Groq(api_key=api_key)
     response = client.chat.completions.create(
-        model="llama3-8b-8192",
+        model="llama-3.3-70b-versatile",
         messages=[
             {"role": "system", "content": "You are a helpful assistant. Answer questions using ONLY the context provided. If the answer is not in the context, say 'I couldn't find that in the document.'"},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},
