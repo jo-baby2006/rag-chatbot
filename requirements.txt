@@ -2,6 +2,4 @@ streamlit
 chromadb
 sentence-transformers
 pymupdf
-langchain
-langchain-community
 groq
