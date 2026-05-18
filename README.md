@@ -121,6 +121,11 @@ Your Groq API key is entered at runtime and stored only as an environment variab
 
 ---
 
+## Live Demo
+ [Click here to try it](https://rag-chatbot-7qxz8mcoxwsdqyqh9wvdeq.streamlit.app/)
+
+---
+
 ##  License
 
 This project is open source. Feel free to fork, modify, and build on it.
